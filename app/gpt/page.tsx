@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Mic, MicOff, ArrowLeft, Volume2, Loader2 } from "lucide-react"
+import { Mic, MicOff, ArrowLeft, Volume2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/components/ui/use-toast"
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition"
@@ -22,28 +22,15 @@ interface Message {
 export default function GPTPage() {
   const router = useRouter()
   const { toast } = useToast()
-  const [isListening, setIsListening] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
   const [messages, setMessages] = useState<Message[]>([
     { role: "assistant", content: "Hello! How can I help you today?" },
   ])
   const { fontSize, highContrast, voiceFeedback } = useAccessibility()
-  const { startListening, stopListening, transcript, resetTranscript } = useSpeechRecognition()
+  const { transcript, isListening, startListening, stopListening, resetTranscript } = useSpeechRecognition()
   const { speak, isSpeaking, stopSpeaking } = useSpeechSynthesis()
   const chatContainerRef = useRef<HTMLDivElement>(null)
-  const [retryCount, setRetryCount] = useState(0)
-  const maxRetries = 3
-
-  useEffect(() => {
-    // Welcome message when page loads
-    if (voiceFeedback) {
-      const timer = setTimeout(() => {
-        speak('Voice assistant ready. Click the microphone or say "Hey Vision" to ask a question.')
-      }, 1000)
-
-      return () => clearTimeout(timer)
-    }
-  }, [speak, voiceFeedback])
+  const [transcriptReady, setTranscriptReady] = useState(false)
 
   useEffect(() => {
     // Scroll to bottom when messages change
@@ -52,25 +39,30 @@ export default function GPTPage() {
     }
   }, [messages])
 
+  // Process transcript when speech recognition stops
   useEffect(() => {
-    if (!transcript || !isListening) return
+    if (!isListening && transcript && transcriptReady) {
+      processTranscript(transcript)
+      setTranscriptReady(false)
+    }
+  }, [isListening, transcript, transcriptReady])
 
-    const command = transcript.toLowerCase()
+  const processTranscript = (text: string) => {
+    if (!text.trim()) return
+
+    const command = text.toLowerCase()
 
     if (command.includes("go back") || command.includes("go home")) {
-      speak("Going back to home page")
       router.push("/")
       return
     }
 
     if (command.includes("go to scan") || command.includes("video analyzer")) {
-      speak("Opening video analyzer")
       router.push("/scan")
       return
     }
 
     if (command.includes("emergency")) {
-      speak("Activating emergency contact")
       toast({
         title: "Emergency Contact",
         description: "Contacting your emergency contact...",
@@ -80,19 +72,13 @@ export default function GPTPage() {
     }
 
     // Process the user's message
-    handleUserMessage(transcript)
-    resetTranscript()
-  }, [transcript, isListening, router, speak, resetTranscript])
+    handleUserMessage(text)
+  }
 
   const handleUserMessage = async (message: string) => {
     // Add user message to chat
     setMessages((prev) => [...prev, { role: "user", content: message }])
-
-    // Stop listening while processing
-    stopListening()
-    setIsListening(false)
     setIsProcessing(true)
-    setRetryCount(0)
 
     try {
       // Call Gemini API
@@ -120,51 +106,19 @@ export default function GPTPage() {
       if (voiceFeedback) {
         speak(aiResponse)
       }
-
-      toast({
-        title: "Response received",
-        description: "The AI has responded to your question",
-      })
     } catch (error) {
       console.error("Error:", error)
-
-      // Implement retry logic
-      if (retryCount < maxRetries) {
-        const nextRetryCount = retryCount + 1
-        setRetryCount(nextRetryCount)
-
-        toast({
-          title: `Retry ${nextRetryCount}/${maxRetries}`,
-          description: "Retrying to get a response...",
-        })
-
-        // Wait a moment before retrying
-        setTimeout(() => {
-          handleUserMessage(message)
-        }, 1000)
-
-        return
-      }
-
-      toast({
-        title: "Error",
-        description: "Failed to get a response. Please try again.",
-        variant: "destructive",
-      })
 
       // Add error message to chat
       setMessages((prev) => [
         ...prev,
         {
           role: "assistant",
-          content: "I'm sorry, I encountered an error processing your request. Please try again.",
+          content: "I'm sorry, I couldn't process your request at the moment. Please try again.",
         },
       ])
     } finally {
-      if (retryCount >= maxRetries) {
-        setIsProcessing(false)
-        setRetryCount(0)
-      }
+      setIsProcessing(false)
     }
   }
 
@@ -176,23 +130,14 @@ export default function GPTPage() {
 
     if (isListening) {
       stopListening()
-      setIsListening(false)
-      toast({
-        title: "Voice recognition stopped",
-        description: "Click the microphone again to start listening",
-      })
-    } else {
-      startListening()
-      setIsListening(true)
-      speak("Listening. What would you like to know?")
-      toast({
-        title: "Listening...",
-        description: "Speak your question now",
-      })
+    } else if (!isProcessing) {
+      // Start listening for 5 seconds
+      startListening(5000)
+      setTranscriptReady(true)
 
       // Add haptic feedback for mobile devices
       if (navigator.vibrate) {
-        navigator.vibrate(200)
+        navigator.vibrate(100)
       }
     }
   }
@@ -205,7 +150,6 @@ export default function GPTPage() {
             variant="ghost"
             size="icon"
             onClick={() => {
-              speak("Going back to home page")
               router.push("/")
             }}
             aria-label="Go back to home"
@@ -241,12 +185,6 @@ export default function GPTPage() {
                 <ChatBubble message={message} fontSize={fontSize} highContrast={highContrast} />
               </motion.div>
             ))}
-
-            {isProcessing && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex justify-center my-4">
-                <Loader2 className="h-8 w-8 animate-spin text-purple-400" />
-              </motion.div>
-            )}
           </AnimatePresence>
         </div>
 
@@ -283,13 +221,11 @@ export default function GPTPage() {
             transition={isListening ? { repeat: Number.POSITIVE_INFINITY, duration: 2 } : {}}
           >
             {isProcessing
-              ? retryCount > 0
-                ? `Processing... (Retry ${retryCount}/${maxRetries})`
-                : "Processing your request..."
+              ? "Processing..."
               : isListening
-                ? "Listening... Speak your question"
+                ? "Listening..."
                 : isSpeaking
-                  ? "Speaking... Click mic to stop"
+                  ? "Speaking..."
                   : "Click mic to ask a question"}
           </motion.p>
 

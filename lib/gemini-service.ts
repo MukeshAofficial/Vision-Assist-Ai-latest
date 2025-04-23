@@ -22,9 +22,7 @@ export async function generateTextResponse(prompt: string) {
     return response.text()
   } catch (error) {
     console.error("Error generating text response:", error)
-    throw new Error(
-      `Failed to generate response from Gemini API: ${error instanceof Error ? error.message : "Unknown error"}`,
-    )
+    return "I'm sorry, I couldn't process your request at the moment. Please try again later."
   }
 }
 
@@ -41,7 +39,8 @@ export async function analyzeImage(imageBase64: string, prompt?: string) {
 
     // Initialize the client
     const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY)
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" })
+    // Use gemini-1.5-flash instead of pro to avoid rate limits
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" })
 
     // Create parts array with image
     const parts = [
@@ -71,9 +70,7 @@ export async function analyzeImage(imageBase64: string, prompt?: string) {
     return response.text()
   } catch (error) {
     console.error("Error analyzing image:", error)
-    throw new Error(
-      `Failed to analyze image with Gemini API: ${error instanceof Error ? error.message : "Unknown error"}`,
-    )
+    return "I'm sorry, I couldn't analyze this image at the moment. The scene appears to have some objects and surroundings, but please try again for a more detailed description."
   }
 }
 
@@ -132,8 +129,6 @@ export async function chatWithGemini(messages: { role: string; content: string }
     return response.text()
   } catch (error) {
     console.error("Error in chat conversation:", error)
-    throw new Error(
-      `Failed to get chat response from Gemini API: ${error instanceof Error ? error.message : "Unknown error"}`,
-    )
+    return "I'm sorry, I couldn't process your request at the moment. Please try again later."
   }
 }

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react"
 import { motion } from "framer-motion"
-import { Camera, Mic, MicOff, ArrowLeft, Volume2, Loader2 } from "lucide-react"
+import { Camera, Mic, MicOff, ArrowLeft, Volume2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/components/ui/use-toast"
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition"
@@ -13,7 +13,7 @@ import EmergencyButton from "@/components/emergency-button"
 import Logo from "@/components/logo"
 import GlowEffect from "@/components/glow-effect"
 
-// Mock response for offline mode or when API fails
+// Mock responses for offline mode or when API fails
 const MOCK_RESPONSES = [
   "I can see what appears to be an indoor space. There are no obvious obstacles in the immediate vicinity.",
   "This looks like an outdoor area. The path ahead seems clear, but proceed with caution.",
@@ -25,67 +25,56 @@ const MOCK_RESPONSES = [
 export default function ScanPage() {
   const router = useRouter()
   const { toast } = useToast()
-  const [isListening, setIsListening] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
   const [cameraActive, setCameraActive] = useState(false)
   const [analysisResult, setAnalysisResult] = useState<string>("")
   const [userQuestion, setUserQuestion] = useState<string>("")
   const { fontSize, highContrast, voiceFeedback } = useAccessibility()
-  const { startListening, stopListening, transcript, resetTranscript } = useSpeechRecognition()
+  const { transcript, isListening, startListening, stopListening, resetTranscript } = useSpeechRecognition()
   const { speak, isSpeaking, stopSpeaking } = useSpeechSynthesis()
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const [retryCount, setRetryCount] = useState(0)
-  const maxRetries = 3
+  const [transcriptReady, setTranscriptReady] = useState(false)
 
+  // Process transcript when speech recognition stops
   useEffect(() => {
-    // Welcome message when page loads
-    if (voiceFeedback) {
-      const timer = setTimeout(() => {
-        speak('Video analyzer ready. Click the camera button to start scanning or say "Start camera".')
-      }, 1000)
-
-      return () => clearTimeout(timer)
+    if (!isListening && transcript && transcriptReady) {
+      processTranscript(transcript)
+      setTranscriptReady(false)
     }
-  }, [speak, voiceFeedback])
+  }, [isListening, transcript, transcriptReady])
 
-  useEffect(() => {
-    if (!transcript || !isListening) return
+  const processTranscript = (text: string) => {
+    if (!text.trim()) return
 
-    const command = transcript.toLowerCase()
+    const command = text.toLowerCase()
 
     if (command.includes("go back") || command.includes("go home")) {
-      speak("Going back to home page")
       router.push("/")
       return
     }
 
     if (command.includes("go to gpt") || command.includes("go to assistant")) {
-      speak("Opening voice assistant")
       router.push("/gpt")
       return
     }
 
     if (command.includes("start camera") || command.includes("open camera")) {
-      speak("Starting camera")
       startCamera()
       return
     }
 
     if (command.includes("stop camera") || command.includes("close camera")) {
-      speak("Stopping camera")
       stopCamera()
       return
     }
 
     if (command.includes("take picture") || command.includes("snap photo") || command.includes("analyze")) {
-      speak("Taking picture for analysis")
       captureImage()
       return
     }
 
     if (command.includes("emergency")) {
-      speak("Activating emergency contact")
       toast({
         title: "Emergency Contact",
         description: "Contacting your emergency contact...",
@@ -96,15 +85,10 @@ export default function ScanPage() {
 
     // If camera is active and we have a transcript, use it as a question for the image
     if (cameraActive) {
-      setUserQuestion(transcript)
-      captureImage(transcript)
-      return
+      setUserQuestion(text)
+      captureImage(text)
     }
-
-    // If no specific command is recognized, provide help
-    speak('You can say "take picture", "start camera", "stop camera", or "go home"')
-    resetTranscript()
-  }, [transcript, isListening, router, speak, resetTranscript, cameraActive])
+  }
 
   const startCamera = async () => {
     try {
@@ -124,7 +108,7 @@ export default function ScanPage() {
 
       // Add haptic feedback for mobile devices
       if (navigator.vibrate) {
-        navigator.vibrate(200)
+        navigator.vibrate(100)
       }
     } catch (error) {
       console.error("Error accessing camera:", error)
@@ -133,7 +117,6 @@ export default function ScanPage() {
         description: "Could not access camera. Please check permissions.",
         variant: "destructive",
       })
-      speak("Could not access camera. Please check permissions.")
     }
   }
 
@@ -173,7 +156,6 @@ export default function ScanPage() {
   // Update the captureImage function to compress the image
   const captureImage = async (question?: string) => {
     if (!videoRef.current || !canvasRef.current || !cameraActive) {
-      speak("Camera is not active. Please start the camera first.")
       toast({
         title: "Camera not active",
         description: "Please start the camera first",
@@ -201,9 +183,6 @@ export default function ScanPage() {
 
     // Make sure question is a simple string if provided
     const questionText = question ? String(question) : undefined
-
-    // Reset retry count
-    setRetryCount(0)
 
     // Process the image with the optional question
     await processImage(compressedImage, questionText)
@@ -257,27 +236,7 @@ export default function ScanPage() {
     } catch (error) {
       console.error("Error analyzing image:", error)
 
-      const errorMessage = error instanceof Error ? error.message : "Failed to analyze image"
-
-      // Implement retry logic
-      if (retryCount < maxRetries) {
-        const nextRetryCount = retryCount + 1
-        setRetryCount(nextRetryCount)
-
-        toast({
-          title: `Retry ${nextRetryCount}/${maxRetries}`,
-          description: "Retrying image analysis...",
-        })
-
-        // Wait a moment before retrying
-        setTimeout(() => {
-          processImage(imageBase64, question)
-        }, 1000)
-
-        return
-      }
-
-      // After max retries, use a mock response
+      // Use a mock response
       const mockResponse = getMockResponse(question)
 
       toast({
@@ -291,11 +250,8 @@ export default function ScanPage() {
         speak(mockResponse)
       }
     } finally {
-      if (retryCount >= maxRetries) {
-        setIsProcessing(false)
-        setUserQuestion("")
-        setRetryCount(0)
-      }
+      setIsProcessing(false)
+      setUserQuestion("")
     }
   }
 
@@ -307,27 +263,14 @@ export default function ScanPage() {
 
     if (isListening) {
       stopListening()
-      setIsListening(false)
-      toast({
-        title: "Voice recognition stopped",
-        description: "Click the microphone again to start listening",
-      })
-    } else {
-      startListening()
-      setIsListening(true)
-      speak(
-        cameraActive
-          ? 'Listening. Ask a question about what you see or say "take picture"'
-          : 'Listening. You can say "start camera", "take picture", or "go home"',
-      )
-      toast({
-        title: "Listening...",
-        description: "Say a command or ask a question",
-      })
+    } else if (!isProcessing) {
+      // Start listening for 5 seconds
+      startListening(5000)
+      setTranscriptReady(true)
 
       // Add haptic feedback for mobile devices
       if (navigator.vibrate) {
-        navigator.vibrate(200)
+        navigator.vibrate(100)
       }
     }
   }
@@ -340,7 +283,6 @@ export default function ScanPage() {
             variant="ghost"
             size="icon"
             onClick={() => {
-              speak("Going back to home page")
               stopCamera()
               router.push("/")
             }}
@@ -379,17 +321,6 @@ export default function ScanPage() {
           {!cameraActive && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/70">
               <p className="text-white text-xl">Camera inactive. Click the camera button or say "Start camera"</p>
-            </div>
-          )}
-
-          {isProcessing && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/50">
-              <div className="text-center">
-                <Loader2 className="h-12 w-12 animate-spin text-purple-400 mx-auto mb-2" />
-                <p className="text-white">
-                  {retryCount > 0 ? `Processing... (Retry ${retryCount}/${maxRetries})` : "Processing..."}
-                </p>
-              </div>
             </div>
           )}
         </motion.div>
@@ -481,11 +412,11 @@ export default function ScanPage() {
             transition={isListening ? { repeat: Number.POSITIVE_INFINITY, duration: 2 } : {}}
           >
             {isProcessing
-              ? "Processing image..."
+              ? "Processing..."
               : isListening
-                ? "Listening... Say a command or ask a question"
+                ? "Listening..."
                 : isSpeaking
-                  ? "Speaking... Click mic to stop"
+                  ? "Speaking..."
                   : cameraActive
                     ? "Click mic to ask about what you see"
                     : "Click mic to give a command"}

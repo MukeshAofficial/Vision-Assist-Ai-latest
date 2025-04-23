@@ -1,11 +1,11 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 
 interface SpeechRecognitionHook {
   transcript: string
   isListening: boolean
-  startListening: () => void
+  startListening: (duration?: number) => void
   stopListening: () => void
   resetTranscript: () => void
   error: string | null
@@ -16,6 +16,7 @@ export function useSpeechRecognition(): SpeechRecognitionHook {
   const [isListening, setIsListening] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [recognition, setRecognition] = useState<any>(null)
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   useEffect(() => {
     // Initialize speech recognition
@@ -29,9 +30,11 @@ export function useSpeechRecognition(): SpeechRecognitionHook {
         recognitionInstance.lang = "en-US"
 
         recognitionInstance.onresult = (event: any) => {
-          const current = event.resultIndex
-          const transcript = event.results[current][0].transcript
-          setTranscript(transcript)
+          let fullTranscript = ""
+          for (let i = 0; i < event.results.length; i++) {
+            fullTranscript += event.results[i][0].transcript
+          }
+          setTranscript(fullTranscript)
         }
 
         recognitionInstance.onerror = (event: any) => {
@@ -53,28 +56,54 @@ export function useSpeechRecognition(): SpeechRecognitionHook {
       if (recognition) {
         recognition.stop()
       }
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current)
+      }
     }
   }, [])
 
-  const startListening = useCallback(() => {
-    if (recognition) {
-      try {
-        recognition.start()
-        setIsListening(true)
-        setError(null)
-      } catch (err) {
-        console.error("Error starting speech recognition:", err)
-        setError("Error starting speech recognition")
+  const startListening = useCallback(
+    (duration = 5000) => {
+      if (recognition) {
+        try {
+          // Clear any existing timeout
+          if (timeoutRef.current) {
+            clearTimeout(timeoutRef.current)
+          }
+
+          // Reset transcript before starting
+          setTranscript("")
+
+          recognition.start()
+          setIsListening(true)
+          setError(null)
+
+          // Set timeout to stop listening after duration
+          timeoutRef.current = setTimeout(() => {
+            if (recognition) {
+              recognition.stop()
+              setIsListening(false)
+            }
+          }, duration)
+        } catch (err) {
+          console.error("Error starting speech recognition:", err)
+          setError("Error starting speech recognition")
+        }
+      } else {
+        setError("Speech recognition not initialized")
       }
-    } else {
-      setError("Speech recognition not initialized")
-    }
-  }, [recognition])
+    },
+    [recognition],
+  )
 
   const stopListening = useCallback(() => {
     if (recognition) {
       recognition.stop()
       setIsListening(false)
+    }
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current)
+      timeoutRef.current = null
     }
   }, [recognition])
 
